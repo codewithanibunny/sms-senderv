@@ -43,16 +43,6 @@ logger = logging.getLogger("sms_hub")
 
 app = FastAPI(title="SMS Forwarding Hub")
 
-@app.middleware("http")
-async def session_middleware(request: Request, call_next):
-    sid = request.query_params.get("session_id") or request.headers.get(SESSION_HEADER) or request.cookies.get(SESSION_COOKIE) or "shared"
-    token = CURRENT_SESSION_ID.set(sid)
-    try:
-        response = await call_next(request)
-        return response
-    finally:
-        CURRENT_SESSION_ID.reset(token)
-
 # Paths
 CONFIG_PATH = DATA_DIR / "web_config.json"
 STATIC_DIR = BASE_DIR / "static"
@@ -79,8 +69,8 @@ DEFAULT_CONFIG = {
     "is_polling_active": bool(os.getenv("SMS_LICENSE_KEY"))
 }
 
-def load_config() -> dict[str, Any]:
-    return load_config_for_session(get_session_id())
+def load_config(request: Request | None = None) -> dict[str, Any]:
+    return load_config_for_session(get_session_id(request))
 
 def _session_key(session_id: str) -> str:
     return hashlib.sha256(session_id.encode("utf-8")).hexdigest()[:16]
@@ -622,7 +612,7 @@ class InjectSmsRequest(BaseModel):
 
 # API Endpoints
 @app.post("/api/login")
-async def api_login(req: LoginRequest, response: Response):
+async def api_login(req: LoginRequest, response: Response, request: Request):
     key = req.license_key.strip()
     link = req.profex_link.strip()
     if not key:
@@ -645,7 +635,7 @@ async def api_login(req: LoginRequest, response: Response):
                 data = await resp.json()
                 if data.get("success") == True:
                     # Key is valid! Save it, config, and activate polling
-                    config = load_config()
+                    config = load_config(request)
                     old_license_key = config.get("license_key", "")
                     session_id = request_session_id = get_session_id()
                     if request_session_id == "shared":
@@ -672,23 +662,24 @@ async def api_login(req: LoginRequest, response: Response):
         raise HTTPException(status_code=500, detail=f"Validation error: {str(e)}")
 
 @app.post("/api/logout")
-async def api_logout(response: Response):
-    config = load_config()
+async def api_logout(response: Response, request: Request):
+    session_id = get_session_id(request)
+    config = load_config(request)
     config["is_polling_active"] = False
     config["license_key"] = ""
     config["last_timestamp"] = 0
-    save_config(config)
+    save_config_for_session(session_id, config)
     response.delete_cookie(SESSION_COOKIE)
     return {"success": True}
 
 @app.post("/api/config/import-link")
-async def api_import_link(req: ImportLinkRequest):
+async def api_import_link(req: ImportLinkRequest, request: Request):
     parsed = parse_profex_link(req.link)
     if not parsed:
         raise HTTPException(status_code=400, detail="Invalid Profex Link. Could not extract credentials.")
     
     firebase_url, auth_key = parsed
-    config = load_config()
+    config = load_config(request)
     config["firebase_url"] = firebase_url
     config["auth_key"] = auth_key
     save_config(config)
@@ -699,8 +690,8 @@ async def api_import_link(req: ImportLinkRequest):
     }
 
 @app.get("/api/config")
-async def api_get_config():
-    config = load_config()
+async def api_get_config(request: Request):
+    config = load_config(request)
     # Return configuration details (hide license key slightly for safety, or return since it is local)
     return {
         "firebase_url": config["firebase_url"],
@@ -712,8 +703,9 @@ async def api_get_config():
     }
 
 @app.post("/api/config")
-async def api_update_config(req: ConfigUpdateRequest):
-    config = load_config()
+async def api_update_config(req: ConfigUpdateRequest, request: Request):
+    session_id = get_session_id(request)
+    config = load_config(request)
     config["firebase_url"] = req.firebase_url.strip()
     config["auth_key"] = req.auth_key.strip()
     config["selected_device_id"] = req.selected_device_id.strip()
@@ -721,12 +713,12 @@ async def api_update_config(req: ConfigUpdateRequest):
     config["poll_interval"] = max(1, req.poll_interval)
     if req.incoming_poll_interval is not None:
         config["incoming_poll_interval"] = max(0.25, min(float(req.incoming_poll_interval), 1.0))
-    save_config(config)
+    save_config_for_session(session_id, config)
     return {"success": True}
 
 @app.get("/api/status")
-async def api_get_status():
-    config = load_config()
+async def api_get_status(request: Request):
+    config = load_config(request)
     license_key = config["license_key"]
     
     online_devices = []
@@ -754,8 +746,8 @@ async def api_get_status():
     }
 
 @app.post("/api/send-test")
-async def api_send_test(req: ManualSendRequest):
-    config = load_config()
+async def api_send_test(req: ManualSendRequest, request: Request):
+    config = load_config(request)
     if not config["firebase_url"] or not config["auth_key"] or not config["selected_device_id"]:
         raise HTTPException(status_code=400, detail="Firebase URL, Auth Key, or Selected Device is missing")
         
@@ -767,8 +759,8 @@ async def api_send_test(req: ManualSendRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/inject-sms")
-async def api_inject_sms(req: InjectSmsRequest):
-    config = load_config()
+async def api_inject_sms(req: InjectSmsRequest, request: Request):
+    config = load_config(request)
     license_key = config.get("license_key", "").strip()
     sender = req.sender.strip()
     body = req.body.strip()
@@ -841,7 +833,7 @@ async def api_inject_sms(req: InjectSmsRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/poll-now")
-async def api_poll_now():
+async def api_poll_now(request: Request):
     try:
         return await poll_vercel_sms_once()
     except Exception as e:
@@ -849,7 +841,7 @@ async def api_poll_now():
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/cron")
-async def api_cron():
+async def api_cron(request: Request):
     try:
         return await poll_vercel_sms_once()
     except Exception as e:
@@ -878,8 +870,8 @@ async def api_get_logs(limit: int = 50):
         return []
 
 @app.get("/api/incoming-sms")
-async def api_get_incoming_sms(limit: int = 20):
-    config = load_config()
+async def api_get_incoming_sms(request: Request, limit: int = 20):
+    config = load_config(request)
     if not config["firebase_url"] or not config["auth_key"] or not config["selected_device_id"]:
         return {
             "success": True,
@@ -906,7 +898,7 @@ async def api_get_incoming_sms(limit: int = 20):
 # Direct Webhook Endpoint
 @app.post("/webhook")
 async def api_webhook(request: Request):
-    config = load_config()
+    config = load_config(request)
     # Expect text or JSON
     content_type = request.headers.get("content-type", "")
     to_number = None
