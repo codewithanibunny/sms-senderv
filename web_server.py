@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 import asyncio
 import base64
+import hashlib
 import json
 import logging
 import os
 import time
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -13,7 +15,7 @@ from urllib import parse
 
 import aiohttp
 from fastapi import FastAPI, HTTPException, Request, BackgroundTasks
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -22,6 +24,8 @@ IS_VERCEL = bool(os.getenv("VERCEL"))
 DISABLE_BACKGROUND_POLLING = bool(os.getenv("SMS_DISABLE_BACKGROUND_POLLING"))
 DATA_DIR = Path(os.getenv("SMS_DATA_DIR", "/tmp/sms-sender" if IS_VERCEL else str(BASE_DIR)))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
+SESSIONS_DIR = DATA_DIR / "sessions"
+SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
 
 # Setup Logging
 LOG_PATH = DATA_DIR / "audit.log"
@@ -38,9 +42,20 @@ logger = logging.getLogger("sms_hub")
 
 app = FastAPI(title="SMS Forwarding Hub")
 
+@app.middleware("http")
+async def session_middleware(request: Request, call_next):
+    token = CURRENT_SESSION_ID.set(request.cookies.get(SESSION_COOKIE, "shared"))
+    try:
+        response = await call_next(request)
+        return response
+    finally:
+        CURRENT_SESSION_ID.reset(token)
+
 # Paths
 CONFIG_PATH = DATA_DIR / "web_config.json"
 STATIC_DIR = BASE_DIR / "static"
+SESSION_COOKIE = "sms_session"
+CURRENT_SESSION_ID: contextvars.ContextVar[str] = contextvars.ContextVar("CURRENT_SESSION_ID", default="shared")
 
 # Global Client Session
 HTTP_SESSION: aiohttp.ClientSession | None = None
@@ -62,11 +77,32 @@ DEFAULT_CONFIG = {
 }
 
 def load_config() -> dict[str, Any]:
-    if not CONFIG_PATH.exists():
-        save_config(DEFAULT_CONFIG)
-        return DEFAULT_CONFIG.copy()
+    return load_config_for_session(get_session_id())
+
+def _session_key(session_id: str) -> str:
+    return hashlib.sha256(session_id.encode("utf-8")).hexdigest()[:16]
+
+def get_session_id(request: Request | None = None) -> str:
+    if request is not None:
+        sid = request.cookies.get(SESSION_COOKIE)
+        if sid:
+            return sid
+    # fallback shared session for unauthenticated/default access
+    return "shared"
+
+def get_session_config_path(session_id: str) -> Path:
+    if session_id == "shared":
+        return CONFIG_PATH
+    return SESSIONS_DIR / f"{_session_key(session_id)}.json"
+
+def load_config_for_session(session_id: str) -> dict[str, Any]:
+    config_path = get_session_config_path(session_id)
+    if not config_path.exists():
+        config = DEFAULT_CONFIG.copy()
+        save_config_for_session(session_id, config)
+        return config
     try:
-        data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+        data = json.loads(config_path.read_text(encoding="utf-8"))
         # Ensure all default keys exist
         for k, v in DEFAULT_CONFIG.items():
             data.setdefault(k, v)
@@ -76,15 +112,22 @@ def load_config() -> dict[str, Any]:
         return DEFAULT_CONFIG.copy()
 
 def save_config(config: dict[str, Any]) -> None:
+    save_config_for_session(get_session_id(), config)
+
+def save_config_for_session(session_id: str, config: dict[str, Any]) -> None:
     try:
-        CONFIG_PATH.write_text(json.dumps(config, indent=2, ensure_ascii=False), encoding="utf-8")
+        config_path = get_session_config_path(session_id)
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(json.dumps(config, indent=2, ensure_ascii=False), encoding="utf-8")
     except Exception as e:
         logger.error(f"Error saving config: {e}")
 
 def append_audit_log(entry: dict[str, Any]) -> None:
     try:
-        LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-        with LOG_PATH.open("a", encoding="utf-8") as f:
+        session_id = str(entry.get("sessionId") or "shared")
+        log_path = SESSIONS_DIR / _session_key(session_id) / "audit.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with log_path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
     except Exception as e:
         logger.error(f"Error writing to audit log: {e}")
@@ -576,7 +619,7 @@ class InjectSmsRequest(BaseModel):
 
 # API Endpoints
 @app.post("/api/login")
-async def api_login(req: LoginRequest):
+async def api_login(req: LoginRequest, response: Response):
     key = req.license_key.strip()
     link = req.profex_link.strip()
     if not key:
@@ -601,6 +644,11 @@ async def api_login(req: LoginRequest):
                     # Key is valid! Save it, config, and activate polling
                     config = load_config()
                     old_license_key = config.get("license_key", "")
+                    session_id = request_session_id = get_session_id()
+                    if request_session_id == "shared":
+                        request_session_id = uuid.uuid4().hex
+                    response.set_cookie(SESSION_COOKIE, request_session_id, httponly=True, samesite="lax")
+                    session_id = request_session_id
                     config["license_key"] = key
                     config["firebase_url"] = firebase_url
                     config["auth_key"] = auth_key
@@ -608,7 +656,7 @@ async def api_login(req: LoginRequest):
                     # If this is a new key, reset the cursor
                     if old_license_key != key:
                         config["last_timestamp"] = 0
-                    save_config(config)
+                    save_config_for_session(session_id, config)
                     return {"success": True, "message": "Access granted"}
                 else:
                     raise HTTPException(status_code=401, detail=data.get("error", "Invalid license key"))
@@ -621,12 +669,13 @@ async def api_login(req: LoginRequest):
         raise HTTPException(status_code=500, detail=f"Validation error: {str(e)}")
 
 @app.post("/api/logout")
-async def api_logout():
+async def api_logout(response: Response):
     config = load_config()
     config["is_polling_active"] = False
     config["license_key"] = ""
     config["last_timestamp"] = 0
     save_config(config)
+    response.delete_cookie(SESSION_COOKIE)
     return {"success": True}
 
 @app.post("/api/config/import-link")
