@@ -45,7 +45,8 @@ app = FastAPI(title="SMS Forwarding Hub")
 
 @app.middleware("http")
 async def session_middleware(request: Request, call_next):
-    token = CURRENT_SESSION_ID.set(request.cookies.get(SESSION_COOKIE, "shared"))
+    sid = request.headers.get("X-SMS-Session") or request.cookies.get(SESSION_COOKIE) or "shared"
+    token = CURRENT_SESSION_ID.set(sid)
     try:
         response = await call_next(request)
         return response
@@ -56,6 +57,7 @@ async def session_middleware(request: Request, call_next):
 CONFIG_PATH = DATA_DIR / "web_config.json"
 STATIC_DIR = BASE_DIR / "static"
 SESSION_COOKIE = "sms_session"
+SESSION_HEADER = "X-SMS-Session"
 CURRENT_SESSION_ID: contextvars.ContextVar[str] = contextvars.ContextVar("CURRENT_SESSION_ID", default="shared")
 
 # Global Client Session
@@ -85,7 +87,7 @@ def _session_key(session_id: str) -> str:
 
 def get_session_id(request: Request | None = None) -> str:
     if request is not None:
-        sid = request.cookies.get(SESSION_COOKIE)
+        sid = request.headers.get(SESSION_HEADER) or request.cookies.get(SESSION_COOKIE)
         if sid:
             return sid
     # fallback shared session for unauthenticated/default access
@@ -649,6 +651,7 @@ async def api_login(req: LoginRequest, response: Response):
                     if request_session_id == "shared":
                         request_session_id = uuid.uuid4().hex
                     response.set_cookie(SESSION_COOKIE, request_session_id, httponly=True, samesite="lax")
+                    response.headers[SESSION_HEADER] = request_session_id
                     session_id = request_session_id
                     config["license_key"] = key
                     config["firebase_url"] = firebase_url
@@ -677,6 +680,7 @@ async def api_logout(response: Response):
     config["last_timestamp"] = 0
     save_config(config)
     response.delete_cookie(SESSION_COOKIE)
+    response.headers[SESSION_HEADER] = ""
     return {"success": True}
 
 @app.post("/api/config/import-link")

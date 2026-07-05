@@ -6,6 +6,15 @@ let incomingInterval = null;
 let currentConfig = {};
 let onlineDevices = [];
 
+function apiFetch(url, options = {}) {
+  const headers = new Headers(options.headers || {});
+  const sessionId = localStorage.getItem("sms_session_id");
+  if (sessionId) {
+    headers.set("X-SMS-Session", sessionId);
+  }
+  return fetch(url, { ...options, headers });
+}
+
 // Init on Load
 window.onload = function () {
   checkAuthStatus();
@@ -17,7 +26,7 @@ window.onload = function () {
 // Check if user is already authenticated
 async function checkAuthStatus() {
   try {
-    const res = await fetch("/api/status");
+    const res = await apiFetch("/api/status");
     if (!res.ok) throw new Error("Server communication error");
     const data = await res.json();
     
@@ -92,7 +101,7 @@ async function handleLogin(e) {
   spinner.style.display = "block";
   
   try {
-    const res = await fetch("/api/login", {
+    const res = await apiFetch("/api/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ license_key: key, profex_link: link })
@@ -100,12 +109,16 @@ async function handleLogin(e) {
     
     const data = await res.json();
     if (res.ok && data.success) {
+      const sessionId = res.headers.get("X-SMS-Session");
+      if (sessionId) {
+        localStorage.setItem("sms_session_id", sessionId);
+      }
       keyInput.value = "";
       linkInput.value = "";
       showToast("License key verified & Profex connection established!", "success");
       
       // Re-fetch status to get updated fields
-      const statusRes = await fetch("/api/status");
+      const statusRes = await apiFetch("/api/status");
       const statusData = await statusRes.json();
       showDashboard(statusData);
     } else {
@@ -130,7 +143,7 @@ async function handleDashboardImportLink() {
   }
   
   try {
-    const res = await fetch("/api/config/import-link", {
+    const res = await apiFetch("/api/config/import-link", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ link: link })
@@ -157,7 +170,8 @@ async function handleDashboardImportLink() {
 
 async function handleLogout() {
   try {
-    await fetch("/api/logout", { method: "POST" });
+    await apiFetch("/api/logout", { method: "POST" });
+    localStorage.removeItem("sms_session_id");
     showToast("Disconnected from stream.", "info");
     showLogin();
   } catch (err) {
@@ -168,7 +182,7 @@ async function handleLogout() {
 // Config CRUD
 async function loadConfig() {
   try {
-    const res = await fetch("/api/config");
+    const res = await apiFetch("/api/config");
     if (!res.ok) return;
     const data = await res.json();
     currentConfig = data;
@@ -201,7 +215,7 @@ async function handleSaveConfig(e) {
   spinner.style.display = "block";
   
   try {
-    const res = await fetch("/api/config", {
+    const res = await apiFetch("/api/config", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -233,7 +247,7 @@ async function handleSaveConfig(e) {
 async function pollStatus() {
   if (!isAuth) return;
   try {
-    const res = await fetch("/api/status");
+    const res = await apiFetch("/api/status");
     if (!res.ok) return;
     const data = await res.json();
     
@@ -324,7 +338,7 @@ async function handleManualSend(e) {
   spinner.style.display = "block";
   
   try {
-    const res = await fetch("/api/send-test", {
+    const res = await apiFetch("/api/send-test", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ to, message })
@@ -351,7 +365,7 @@ async function handleManualSend(e) {
 async function loadLogs() {
   if (!isAuth) return;
   try {
-    const res = await fetch("/api/logs");
+    const res = await apiFetch("/api/logs");
     if (!res.ok) return;
     const logs = await res.json();
     renderLogs(logs);
@@ -414,7 +428,7 @@ async function loadIncomingSms() {
   if (!tbody) return;
 
   try {
-    const res = await fetch("/api/incoming-sms?limit=20");
+    const res = await apiFetch("/api/incoming-sms?limit=20");
     if (!res.ok) throw new Error("Incoming SMS fetch failed");
     const data = await res.json();
     renderIncomingSms(data.messages || [], data.configured);
@@ -506,7 +520,7 @@ async function sendIncomingSms(button) {
   button.innerText = "Sending";
 
   try {
-    const res = await fetch("/api/inject-sms", {
+    const res = await apiFetch("/api/inject-sms", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ sender, body })
