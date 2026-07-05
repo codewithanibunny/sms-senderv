@@ -109,7 +109,7 @@ async function handleLogin(e) {
     
     const data = await res.json();
     if (res.ok && data.success) {
-      const sessionId = res.headers.get("X-SMS-Session");
+      const sessionId = data.session_id || res.headers.get("X-SMS-Session");
       if (sessionId) {
         localStorage.setItem("sms_session_id", sessionId);
       }

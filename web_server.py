@@ -651,7 +651,6 @@ async def api_login(req: LoginRequest, response: Response):
                     if request_session_id == "shared":
                         request_session_id = uuid.uuid4().hex
                     response.set_cookie(SESSION_COOKIE, request_session_id, httponly=True, samesite="lax")
-                    response.headers[SESSION_HEADER] = request_session_id
                     session_id = request_session_id
                     config["license_key"] = key
                     config["firebase_url"] = firebase_url
@@ -661,7 +660,7 @@ async def api_login(req: LoginRequest, response: Response):
                     if old_license_key != key:
                         config["last_timestamp"] = 0
                     save_config_for_session(session_id, config)
-                    return {"success": True, "message": "Access granted"}
+                    return {"success": True, "message": "Access granted", "session_id": session_id}
                 else:
                     raise HTTPException(status_code=401, detail=data.get("error", "Invalid license key"))
             else:
@@ -680,7 +679,6 @@ async def api_logout(response: Response):
     config["last_timestamp"] = 0
     save_config(config)
     response.delete_cookie(SESSION_COOKIE)
-    response.headers[SESSION_HEADER] = ""
     return {"success": True}
 
 @app.post("/api/config/import-link")
