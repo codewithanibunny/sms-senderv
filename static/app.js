@@ -9,10 +9,14 @@ let onlineDevices = [];
 function apiFetch(url, options = {}) {
   const headers = new Headers(options.headers || {});
   const sessionId = localStorage.getItem("sms_session_id");
+  const method = (options.method || "GET").toUpperCase();
+  let finalUrl = url;
   if (sessionId) {
     headers.set("X-SMS-Session", sessionId);
+    const joiner = finalUrl.includes("?") ? "&" : "?";
+    finalUrl = `${finalUrl}${joiner}session_id=${encodeURIComponent(sessionId)}`;
   }
-  return fetch(url, { ...options, headers });
+  return fetch(finalUrl, { ...options, headers });
 }
 
 // Init on Load

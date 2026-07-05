@@ -45,7 +45,7 @@ app = FastAPI(title="SMS Forwarding Hub")
 
 @app.middleware("http")
 async def session_middleware(request: Request, call_next):
-    sid = request.headers.get("X-SMS-Session") or request.cookies.get(SESSION_COOKIE) or "shared"
+    sid = request.query_params.get("session_id") or request.headers.get(SESSION_HEADER) or request.cookies.get(SESSION_COOKIE) or "shared"
     token = CURRENT_SESSION_ID.set(sid)
     try:
         response = await call_next(request)
@@ -87,7 +87,7 @@ def _session_key(session_id: str) -> str:
 
 def get_session_id(request: Request | None = None) -> str:
     if request is not None:
-        sid = request.headers.get(SESSION_HEADER) or request.cookies.get(SESSION_COOKIE)
+        sid = request.query_params.get("session_id") or request.headers.get(SESSION_HEADER) or request.cookies.get(SESSION_COOKIE)
         if sid:
             return sid
     # fallback shared session for unauthenticated/default access
