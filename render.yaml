@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: sms-forwarding-hub
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m uvicorn web_server:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.13.0
+      - key: SMS_DISABLE_BACKGROUND_POLLING
+        value: "1"
+      - key: SMS_POLL_INTERVAL
+        value: "2"
+      - key: SMS_INCOMING_POLL_INTERVAL
+        value: "0.5"

@@ -1,0 +1,11 @@
+.env
+web_config.json
+access_store.json
+audit.log
+web_server.log
+__pycache__/
+*.pyc
+.git/
+.vercel/
+.agents/
+.codex/

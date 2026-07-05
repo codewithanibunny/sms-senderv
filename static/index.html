@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>✦ SMS Forwarding Hub ✦</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700;800&family=Cinzel:wght@600;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+  <!-- Background Glowing Blobs -->
+  <div class="blob blob-blue"></div>
+  <div class="blob blob-purple"></div>
+
+  <!-- Toast Notification Container -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <!-- LOGIN SCREEN -->
+  <div class="login-container" id="loginContainer">
+    <div class="login-card" id="loginCard">
+      <div class="login-header">
+        <div class="login-logo">⚡</div>
+        <h2>SMS FORWARDING HUB</h2>
+        <p>Access the Profex SMS Gateway Stream</p>
+      </div>
+      <form id="loginForm" onsubmit="handleLogin(event)">
+        <div class="form-group">
+          <label for="licenseKey">Vercel License Key</label>
+          <input type="password" id="licenseKey" required placeholder="Enter your Vercel feed license key..." autocomplete="current-password">
+        </div>
+        <div class="form-group">
+          <label for="profexLink">Profex Panel URL</label>
+          <input type="text" id="profexLink" required placeholder="https://profexpanel.netlify.app/?s=...">
+        </div>
+        <button type="submit" class="btn-primary" id="loginSubmitBtn">
+          <span>Verify & Connect Gateway</span>
+          <div class="spinner" id="loginSpinner"></div>
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- MAIN APP CONTAINER -->
+  <div class="app-container hidden" id="appContainer">
+    <header>
+      <div class="brand-info">
+        <h1>✦ SMS GATEWAY CONTROL ✦</h1>
+        <p class="subtitle">Real-time Vercel-to-Profex Forwarding Node</p>
+      </div>
+      <div class="session-info">
+        <div class="status-indicator live" id="vercelPollingStatus">
+          <div class="status-dot"></div>
+          <span>Stream Active</span>
+        </div>
+        <div class="key-badge">
+          KEY: <span id="activeKeyText">Loading...</span>
+        </div>
+        <button class="btn-logout" onclick="handleLogout()">Disconnect</button>
+      </div>
+    </header>
+
+    <main class="dashboard-grid">
+      <!-- PANEL 1: Connection & Status -->
+      <section class="card status-card">
+        <h3>System Diagnostics</h3>
+        <div class="diagnostic-grid">
+          <div class="diagnostic-item">
+            <span class="label">Vercel API Stream</span>
+            <span class="value" id="statusVercel">Connecting...</span>
+          </div>
+          <div class="diagnostic-item">
+            <span class="label">Last Stream Poll</span>
+            <span class="value" id="statusLastPoll">Never</span>
+          </div>
+          <div class="diagnostic-item">
+            <span class="label">Firebase Gateway</span>
+            <span class="value" id="statusFirebase">Connecting...</span>
+          </div>
+          <div class="diagnostic-item">
+            <span class="label">Active Device Link</span>
+            <span class="value text-glow-green" id="statusDevice">Connecting...</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- PANEL 2: Configuration Settings -->
+      <section class="card config-card">
+        <h3>Gateway Configuration</h3>
+        
+        <!-- Auto Import Link Input -->
+        <div class="form-group" style="margin-bottom: 1.5rem; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 1.2rem;">
+          <label for="profexLinkImportDashboard">Auto-Configure via Profex Link</label>
+          <div style="display: flex; gap: 8px;">
+            <input type="text" id="profexLinkImportDashboard" placeholder="Paste https://profexpanel.netlify.app/?s=...">
+            <button type="button" class="btn-primary" style="width: auto; padding: 0 1.2rem; font-size: 0.85rem;" onclick="handleDashboardImportLink()">Import</button>
+          </div>
+        </div>
+
+        <form id="configForm" onsubmit="handleSaveConfig(event)">
+          <div class="form-group">
+            <label for="firebaseUrl">Firebase Database URL</label>
+            <input type="text" id="firebaseUrl" required placeholder="https://your-rtdb.firebaseio.com">
+          </div>
+          <div class="form-group">
+            <label for="authKey">Firebase Auth Key (Secret)</label>
+            <input type="password" id="authKey" required placeholder="Firebase Database secret key..." autocomplete="new-password">
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="selectedDevice">Active Target Device</label>
+              <input type="text" id="selectedDevice" list="onlineDevicesList" required placeholder="Search or type device ID...">
+              <datalist id="onlineDevicesList"></datalist>
+            </div>
+            <div class="form-group select-sim">
+              <label for="simSlot">SIM Slot</label>
+              <select id="simSlot" required>
+                <option value="1">SIM 1</option>
+                <option value="2">SIM 2</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="pollInterval">Poll Interval (seconds)</label>
+            <input type="number" id="pollInterval" min="1" max="60" required value="2">
+          </div>
+          <button type="submit" class="btn-primary" id="saveConfigBtn">
+            <span>Save Configuration</span>
+            <div class="spinner" id="saveSpinner"></div>
+          </button>
+        </form>
+      </section>
+
+      <!-- PANEL 3: Direct Manual SMS Tester -->
+      <section class="card test-card">
+        <h3>Manual Bypass Console</h3>
+        <p class="section-desc">Instantly dispatch an SMS through the selected Profex device bypass</p>
+        <form id="manualSendForm" onsubmit="handleManualSend(event)">
+          <div class="form-group">
+            <label for="testRecipient">Recipient Phone Number</label>
+            <input type="text" id="testRecipient" required placeholder="e.g. +917799022371">
+          </div>
+          <div class="form-group">
+            <label for="testMessage">Message Content</label>
+            <textarea id="testMessage" required rows="3" placeholder="Enter message text or encrypted code..."></textarea>
+          </div>
+          <button type="submit" class="btn-secondary" id="sendTestBtn">
+            <span>Queue Manual SMS</span>
+            <div class="spinner" id="testSpinner"></div>
+          </button>
+        </form>
+      </section>
+
+      <!-- PANEL 4: Webhook Reference Guide -->
+      <section class="card webhook-card">
+        <h3>Bypass Webhook Guide</h3>
+        <p class="section-desc">You can post payloads to the backend server via webhook instead of polling.</p>
+        <div class="webhook-info">
+          <div class="info-block">
+            <span class="info-label">POST Webhook URL</span>
+            <code id="webhookUrlDisplay">http://localhost:5000/webhook</code>
+          </div>
+          <div class="info-block">
+            <span class="info-label">JSON Payload Shape</span>
+            <pre><code>{
+  "recipient": "7799022371",
+  "body": "Your Encrypted Code Here"
+}</code></pre>
+          </div>
+        </div>
+      </section>
+
+      <!-- PANEL 5: Live Activity Logs -->
+      <section class="card incoming-card">
+        <div class="logs-header">
+          <h3>Incoming SMS</h3>
+          <button class="btn-text" onclick="loadIncomingSms()">Refresh Inbox</button>
+        </div>
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>From</th>
+                <th>Message Snippet</th>
+                <th>SIM</th>
+                <th>Status</th>
+                <th>Copy</th>
+                <th>Send</th>
+              </tr>
+            </thead>
+            <tbody id="incomingTableBody">
+              <tr>
+                <td colspan="7" class="text-center text-muted">Waiting for incoming SMS...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- PANEL 6: Live Activity Logs -->
+      <section class="card logs-card">
+        <div class="logs-header">
+          <h3>Live Activity Stream</h3>
+          <button class="btn-text" onclick="loadLogs()">Refresh Logs</button>
+        </div>
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Recipient</th>
+                <th>Message Snippet</th>
+                <th>SIM</th>
+                <th>Status</th>
+                <th>Speed</th>
+              </tr>
+            </thead>
+            <tbody id="logsTableBody">
+              <tr>
+                <td colspan="6" class="text-center text-muted">Awaiting stream activation...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="/static/app.js?v=20260701-inject-1"></script>
+</body>
+</html>
