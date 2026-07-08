@@ -324,9 +324,18 @@ async def firebase_put_json(url: str, payload: dict[str, Any]) -> dict[str, Any]
     if not HTTP_SESSION:
         raise Exception("HTTP Session is not active")
     async with HTTP_SESSION.put(url, json=payload) as resp:
-        resp.raise_for_status()
         body = await resp.text()
-        return json.loads(body) if body else {}
+        try:
+            parsed_body = json.loads(body) if body else {}
+        except Exception:
+            parsed_body = {"raw": body}
+        if resp.status >= 400:
+            raise RuntimeError(
+                f"Firebase PUT failed with {resp.status}: {parsed_body.get('error') or parsed_body.get('raw') or body or 'empty response'}"
+            )
+        if isinstance(parsed_body, dict) and parsed_body.get("error"):
+            raise RuntimeError(f"Firebase error: {parsed_body['error']}")
+        return parsed_body if isinstance(parsed_body, dict) else {"raw": body}
 
 async def send_sms_via_profex(config: dict[str, Any], to_number: str, message_text: str) -> dict[str, Any]:
     t0 = time.perf_counter()
@@ -340,7 +349,32 @@ async def send_sms_via_profex(config: dict[str, Any], to_number: str, message_te
     send_sms_url = build_send_sms_url(
         config["firebase_url"], config["selected_device_id"], config["auth_key"]
     )
-    result = await firebase_put_json(send_sms_url, payload)
+    try:
+        result = await firebase_put_json(send_sms_url, payload)
+    except Exception as e:
+        logger.error(
+            "Firebase send failed for device=%s sim=%s to=%s url=%s payload=%s error=%s",
+            config.get("selected_device_id"),
+            config.get("selected_sim_slot"),
+            to_number,
+            send_sms_url,
+            payload,
+            e,
+        )
+        append_audit_log(
+            {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "status": "send_failed",
+                "direction": "outgoing",
+                "deviceId": config["selected_device_id"],
+                "simSlot": config["selected_sim_slot"],
+                "to": to_number,
+                "message": message_text,
+                "elapsedSeconds": round(time.perf_counter() - t0, 4),
+                "error": str(e),
+            }
+        )
+        raise
     elapsed_s = time.perf_counter() - t0
     
     append_audit_log(
@@ -356,7 +390,7 @@ async def send_sms_via_profex(config: dict[str, Any], to_number: str, message_te
             "result": result,
         }
     )
-    return result
+    return {"status": "ok", "firebase_response": result, "elapsedSeconds": round(elapsed_s, 4)}
 
 async def inject_sms_to_vercel_api(license_key: str, sender: str, body: str) -> dict[str, Any]:
     if HTTP_SESSION is None:
@@ -778,7 +812,7 @@ async def api_send_test(req: ManualSendRequest, request: Request):
         return {"success": True, "result": result}
     except Exception as e:
         logger.error(f"Manual send error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"SMS send failed: {e}")
 
 @app.post("/api/inject-sms")
 async def api_inject_sms(req: InjectSmsRequest, request: Request):
@@ -985,7 +1019,7 @@ async def api_webhook(request: Request):
         result = await send_sms_via_profex(config, to_number, message_text)
         return {"success": True, "result": result}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"SMS send failed: {e}")
 
 # Fallback to serve static files
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
