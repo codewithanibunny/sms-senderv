@@ -425,12 +425,8 @@ function renderLogs(logs, tbodyId) {
     const party = isAuto ? (log.from || "-") : (log.to || "-");
     
     // Status Badge
-    let badgeClass = "badge-queued";
     const direction = log.direction === "incoming" ? "IN" : "OUT";
-    let statusText = log.status || "queued";
-    if (statusText !== "queued" && statusText !== "ok") {
-      badgeClass = "badge-error";
-    }
+    const statusMeta = formatLogStatus(log.status, log);
     
     const speedText = log.elapsedSeconds ? `${log.elapsedSeconds.toFixed(2)}s` : "-";
     
@@ -439,11 +435,40 @@ function renderLogs(logs, tbodyId) {
       <td style="font-family: monospace; font-weight: 600;">${escapeHtml(String(party))}</td>
       <td title="${escapeHtml(msg)}">${escapeHtml(snippet)}</td>
       <td>${log.simSlot ? "SIM " + log.simSlot : "-"}</td>
-      <td><span class="status-badge ${badgeClass}">${direction} ${statusText}</span></td>
+      <td><span class="status-badge ${statusMeta.className}">${direction} ${statusMeta.label}</span></td>
       <td>${speedText}</td>
     `;
     tbody.appendChild(tr);
   });
+}
+
+function formatLogStatus(status, log = {}) {
+  const normalized = String(status || "").trim().toLowerCase();
+  if (normalized === "queued" || normalized === "ok" || normalized === "sent") {
+    return { className: "badge-queued", label: "SMS sent successfully" };
+  }
+  if (normalized === "send_failed" || normalized === "failed" || normalized === "error") {
+    return { className: "badge-error", label: "SMS failed" };
+  }
+  if (normalized === "auto_injected") {
+    return { className: "badge-queued", label: "Auto injected" };
+  }
+  if (normalized === "auto_inject_failed") {
+    return { className: "badge-error", label: "Auto inject failed" };
+  }
+  if (normalized === "injected") {
+    return { className: "badge-queued", label: "Injected" };
+  }
+  if (normalized === "inject_failed") {
+    return { className: "badge-error", label: "Inject failed" };
+  }
+  if (normalized === "received") {
+    return { className: "badge-received", label: "Received" };
+  }
+  if (log.result && typeof log.result === "object" && (log.result.firebase_response || log.result.status === "ok")) {
+    return { className: "badge-queued", label: "SMS sent successfully" };
+  }
+  return { className: "badge-queued", label: status ? String(status).replace(/_/g, " ") : "Queued" };
 }
 
 // Incoming SMS Loader
