@@ -115,10 +115,15 @@ def save_config_for_session(session_id: str, config: dict[str, Any]) -> None:
     except Exception as e:
         logger.error(f"Error saving config: {e}")
 
+def get_audit_log_path(session_id: str) -> Path:
+    if session_id == "shared":
+        return LOG_PATH
+    return SESSIONS_DIR / _session_key(session_id) / "audit.log"
+
 def append_audit_log(entry: dict[str, Any]) -> None:
     try:
         session_id = str(entry.get("sessionId") or "shared")
-        log_path = SESSIONS_DIR / _session_key(session_id) / "audit.log"
+        log_path = get_audit_log_path(session_id)
         log_path.parent.mkdir(parents=True, exist_ok=True)
         with log_path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
@@ -849,17 +854,27 @@ async def api_cron(request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/logs")
-async def api_get_logs(limit: int = 50):
-    if not LOG_PATH.exists():
+async def api_get_logs(request: Request, limit: int = 50, kind: str = "all"):
+    session_id = get_session_id(request)
+    log_path = get_audit_log_path(session_id)
+    if not log_path.exists() and LOG_PATH.exists():
+        log_path = LOG_PATH
+    if not log_path.exists():
         return []
     try:
-        lines = LOG_PATH.read_text(encoding="utf-8").strip().split("\n")
+        lines = log_path.read_text(encoding="utf-8").strip().split("\n")
         parsed_logs = []
         for line in reversed(lines):
             if not line:
                 continue
             try:
-                parsed_logs.append(json.loads(line))
+                entry = json.loads(line)
+                status = str(entry.get("status", "")).strip().lower()
+                if kind == "auto" and status not in {"auto_injected", "auto_inject_failed"}:
+                    continue
+                if kind == "activity" and status in {"auto_injected", "auto_inject_failed"}:
+                    continue
+                parsed_logs.append(entry)
             except Exception:
                 parsed_logs.append({"timestamp": datetime.now(timezone.utc).isoformat(), "message": line, "status": "raw"})
             if len(parsed_logs) >= limit:

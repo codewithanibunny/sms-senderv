@@ -58,7 +58,8 @@ function showDashboard(statusData) {
   // Initial Loads
   loadConfig();
   updateStatusUI(statusData);
-  loadLogs();
+  loadActivityLogs();
+  loadAutoLogs();
   loadIncomingSms();
   
   // Start Polling Loops
@@ -67,7 +68,10 @@ function showDashboard(statusData) {
   
   // Start Logs Loading Loops
   if (logsInterval) clearInterval(logsInterval);
-  logsInterval = setInterval(loadLogs, 5000);
+  logsInterval = setInterval(() => {
+    loadActivityLogs();
+    loadAutoLogs();
+  }, 5000);
 
   if (incomingInterval) clearInterval(incomingInterval);
   incomingInterval = setInterval(loadIncomingSms, 5000);
@@ -353,7 +357,7 @@ async function handleManualSend(e) {
       showToast("Manual SMS successfully queued via Firebase!", "success");
       document.getElementById("testRecipient").value = "";
       document.getElementById("testMessage").value = "";
-      loadLogs(); // Refresh logs to show this sent message
+      loadActivityLogs(); // Refresh logs to show this sent message
     } else {
       showToast(data.detail || "Manual send failed.", "error");
     }
@@ -366,24 +370,39 @@ async function handleManualSend(e) {
 }
 
 // Logs Loader
-async function loadLogs() {
+async function loadActivityLogs() {
   if (!isAuth) return;
   try {
-    const res = await apiFetch("/api/logs");
+    const res = await apiFetch("/api/logs?kind=activity&limit=50");
     if (!res.ok) return;
     const logs = await res.json();
-    renderLogs(logs);
+    renderLogs(logs, "logsTableBody");
   } catch (err) {
     console.error("Error loading logs:", err);
   }
 }
 
-function renderLogs(logs) {
-  const tbody = document.getElementById("logsTableBody");
+async function loadAutoLogs() {
+  if (!isAuth) return;
+  try {
+    const res = await apiFetch("/api/logs?kind=auto&limit=50");
+    if (!res.ok) return;
+    const logs = await res.json();
+    renderLogs(logs, "autoLogsTableBody");
+  } catch (err) {
+    console.error("Error loading auto logs:", err);
+  }
+}
+
+function renderLogs(logs, tbodyId) {
+  const tbody = document.getElementById(tbodyId);
   tbody.innerHTML = "";
   
   if (logs.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="6" class="text-center text-muted">No historical transactions logged yet.</td></tr>`;
+    const emptyText = tbodyId === "autoLogsTableBody"
+      ? "No auto-send transactions logged yet."
+      : "No historical transactions logged yet.";
+    tbody.innerHTML = `<tr><td colspan="6" class="text-center text-muted">${emptyText}</td></tr>`;
     return;
   }
   

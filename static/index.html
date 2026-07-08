@@ -204,7 +204,7 @@
       <section class="card logs-card">
         <div class="logs-header">
           <h3>Live Activity Stream</h3>
-          <button class="btn-text" onclick="loadLogs()">Refresh Logs</button>
+          <button class="btn-text" onclick="loadActivityLogs()">Refresh Logs</button>
         </div>
         <div class="table-wrapper">
           <table>
@@ -221,6 +221,32 @@
             <tbody id="logsTableBody">
               <tr>
                 <td colspan="6" class="text-center text-muted">Awaiting stream activation...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="card logs-card">
+        <div class="logs-header">
+          <h3>Auto Send Logs</h3>
+          <button class="btn-text" onclick="loadAutoLogs()">Refresh Auto Logs</button>
+        </div>
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>From</th>
+                <th>Message Snippet</th>
+                <th>SIM</th>
+                <th>Status</th>
+                <th>Speed</th>
+              </tr>
+            </thead>
+            <tbody id="autoLogsTableBody">
+              <tr>
+                <td colspan="6" class="text-center text-muted">Awaiting auto-send activity...</td>
               </tr>
             </tbody>
           </table>
