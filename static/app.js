@@ -421,6 +421,8 @@ function renderLogs(logs, tbodyId) {
     // Message snippet
     const msg = log.message || "";
     const snippet = msg.length > 30 ? msg.substring(0, 30) + "..." : msg;
+    const isAuto = log.status === "auto_injected" || log.status === "auto_inject_failed";
+    const party = isAuto ? (log.from || "-") : (log.to || "-");
     
     // Status Badge
     let badgeClass = "badge-queued";
@@ -434,7 +436,7 @@ function renderLogs(logs, tbodyId) {
     
     tr.innerHTML = `
       <td>${timeStr}</td>
-      <td style="font-family: monospace; font-weight: 600;">${log.to || "-"}</td>
+      <td style="font-family: monospace; font-weight: 600;">${escapeHtml(String(party))}</td>
       <td title="${escapeHtml(msg)}">${escapeHtml(snippet)}</td>
       <td>${log.simSlot ? "SIM " + log.simSlot : "-"}</td>
       <td><span class="status-badge ${badgeClass}">${direction} ${statusText}</span></td>

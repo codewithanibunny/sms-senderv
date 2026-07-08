@@ -120,6 +120,23 @@ def get_audit_log_path(session_id: str) -> Path:
         return LOG_PATH
     return SESSIONS_DIR / _session_key(session_id) / "audit.log"
 
+def read_log_entries(path: Path) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    try:
+        lines = path.read_text(encoding="utf-8").strip().split("\n")
+        entries: list[dict[str, Any]] = []
+        for line in lines:
+            if not line:
+                continue
+            try:
+                entries.append(json.loads(line))
+            except Exception:
+                entries.append({"timestamp": datetime.now(timezone.utc).isoformat(), "message": line, "status": "raw"})
+        return entries
+    except Exception:
+        return []
+
 def append_audit_log(entry: dict[str, Any]) -> None:
     try:
         session_id = str(entry.get("sessionId") or "shared")
@@ -856,29 +873,38 @@ async def api_cron(request: Request):
 @app.get("/api/logs")
 async def api_get_logs(request: Request, limit: int = 50, kind: str = "all"):
     session_id = get_session_id(request)
-    log_path = get_audit_log_path(session_id)
-    if not log_path.exists() and LOG_PATH.exists():
-        log_path = LOG_PATH
-    if not log_path.exists():
+    log_paths = []
+    session_path = get_audit_log_path(session_id)
+    if session_path.exists():
+        log_paths.append(session_path)
+    if LOG_PATH.exists() and LOG_PATH != session_path:
+        log_paths.append(LOG_PATH)
+    if not log_paths:
         return []
     try:
-        lines = log_path.read_text(encoding="utf-8").strip().split("\n")
         parsed_logs = []
-        for line in reversed(lines):
-            if not line:
-                continue
-            try:
-                entry = json.loads(line)
+        seen = set()
+        for log_path in log_paths:
+            for entry in read_log_entries(log_path):
+                sig = (
+                    entry.get("timestamp"),
+                    entry.get("status"),
+                    entry.get("message"),
+                    entry.get("to"),
+                    entry.get("from"),
+                    entry.get("sessionId"),
+                )
+                if sig in seen:
+                    continue
+                seen.add(sig)
                 status = str(entry.get("status", "")).strip().lower()
                 if kind == "auto" and status not in {"auto_injected", "auto_inject_failed"}:
                     continue
                 if kind == "activity" and status in {"auto_injected", "auto_inject_failed"}:
                     continue
                 parsed_logs.append(entry)
-            except Exception:
-                parsed_logs.append({"timestamp": datetime.now(timezone.utc).isoformat(), "message": line, "status": "raw"})
-            if len(parsed_logs) >= limit:
-                break
+        parsed_logs.sort(key=lambda item: str(item.get("timestamp", "")), reverse=True)
+        parsed_logs = parsed_logs[:limit]
         return parsed_logs
     except Exception as e:
         logger.error(f"Error reading logs: {e}")
