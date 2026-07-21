@@ -649,6 +649,7 @@ header .subtitle {
 table {
   width: 100%;
   border-collapse: collapse;
+  table-layout: fixed;
   font-size: 0.85rem;
   text-align: left;
 }
@@ -656,6 +657,7 @@ table {
 th, td {
   padding: 0.85rem 1rem;
   border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+  vertical-align: middle;
 }
 
 th {
@@ -673,6 +675,49 @@ tr:last-child td {
 
 tbody tr:hover {
   background: rgba(255, 255, 255, 0.02);
+}
+
+td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  word-break: break-word;
+}
+
+.incoming-card th:nth-child(1),
+.incoming-card td:nth-child(1) {
+  width: 14%;
+}
+
+.incoming-card th:nth-child(2),
+.incoming-card td:nth-child(2) {
+  width: 16%;
+}
+
+.incoming-card th:nth-child(3),
+.incoming-card td:nth-child(3) {
+  width: 34%;
+}
+
+.incoming-card th:nth-child(4),
+.incoming-card td:nth-child(4) {
+  width: 8%;
+}
+
+.incoming-card th:nth-child(5),
+.incoming-card td:nth-child(5) {
+  width: 12%;
+}
+
+.incoming-card th:nth-child(6),
+.incoming-card td:nth-child(6),
+.incoming-card th:nth-child(7),
+.incoming-card td:nth-child(7) {
+  width: 8%;
+}
+
+.incoming-card td:nth-child(6),
+.incoming-card td:nth-child(7) {
+  text-align: center;
 }
 
 .status-badge {
@@ -701,6 +746,49 @@ tbody tr:hover {
   background: rgba(59, 130, 246, 0.15);
   color: #93c5fd;
   border: 1px solid rgba(59, 130, 246, 0.3);
+}
+
+.incoming-card button {
+  appearance: none;
+  border: 0;
+  outline: none;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.incoming-card .btn-copy-sms,
+.incoming-card .btn-send-inject {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 72px;
+  min-height: 34px;
+  border-radius: 8px;
+  font-size: 0.78rem;
+  letter-spacing: 0.01rem;
+  box-shadow: 0 0 0 transparent;
+}
+
+.incoming-card .btn-copy-sms {
+  background: rgba(59, 130, 246, 0.12);
+  border: 1px solid rgba(59, 130, 246, 0.35);
+  color: #bfdbfe;
+}
+
+.incoming-card .btn-copy-sms:hover {
+  background: rgba(59, 130, 246, 0.2);
+  transform: translateY(-1px);
+}
+
+.incoming-card .btn-send-inject {
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  color: #a7f3d0;
+}
+
+.incoming-card .btn-send-inject:hover:not(:disabled) {
+  background: rgba(16, 185, 129, 0.2);
+  transform: translateY(-1px);
 }
 
 /* ANIMATIONS */
