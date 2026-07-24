@@ -309,15 +309,28 @@ function updateStatusUI(data) {
   
   // 2. Firebase Status
   const firebaseStatus = document.getElementById("statusFirebase");
+  const firebaseChip = document.getElementById("firebaseOnlineChip");
   if (!data.firebase_configured) {
     firebaseStatus.innerText = "Not Configured";
     firebaseStatus.className = "value text-muted";
+    if (firebaseChip) {
+      firebaseChip.innerText = "OFFLINE";
+      firebaseChip.className = "status-chip offline";
+    }
   } else if (data.firebase_connected) {
     firebaseStatus.innerText = "Connected";
     firebaseStatus.className = "value text-glow-green";
+    if (firebaseChip) {
+      firebaseChip.innerText = "ONLINE";
+      firebaseChip.className = "status-chip online";
+    }
   } else {
     firebaseStatus.innerText = "Connection Failed";
     firebaseStatus.className = "value text-glow-red";
+    if (firebaseChip) {
+      firebaseChip.innerText = "OFFLINE";
+      firebaseChip.className = "status-chip offline";
+    }
   }
   
   // 3. Device status
