@@ -84,6 +84,12 @@
             <span class="value text-glow-green" id="statusDevice">Connecting...</span>
           </div>
         </div>
+        <div class="diagnostic-actions">
+          <button type="button" class="btn-secondary btn-monitor" id="monitorStartBtn" onclick="handleStartMonitoring()">
+            <span>Start Monitoring</span>
+          </button>
+          <span class="monitor-hint" id="monitorHint">Monitoring is inactive until you start it.</span>
+        </div>
       </section>
 
       <!-- PANEL 2: Configuration Settings -->

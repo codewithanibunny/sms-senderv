@@ -5,6 +5,7 @@ let logsInterval = null;
 let incomingInterval = null;
 let currentConfig = {};
 let onlineDevices = [];
+let monitoringExpiresTimer = null;
 
 function apiFetch(url, options = {}) {
   const headers = new Headers(options.headers || {});
@@ -61,6 +62,7 @@ function showDashboard(statusData) {
   loadActivityLogs();
   loadAutoLogs();
   loadIncomingSms();
+  refreshMonitoringUi(statusData);
   
   // Start Polling Loops
   if (pollingInterval) clearInterval(pollingInterval);
@@ -87,6 +89,7 @@ function showLogin() {
   if (pollingInterval) clearInterval(pollingInterval);
   if (logsInterval) clearInterval(logsInterval);
   if (incomingInterval) clearInterval(incomingInterval);
+  if (monitoringExpiresTimer) clearInterval(monitoringExpiresTimer);
 }
 
 // UI Handlers
@@ -237,6 +240,8 @@ async function handleSaveConfig(e) {
     
     if (res.ok) {
       showToast("Configuration saved successfully!", "success");
+      currentConfig.selected_device_id = device;
+      showMonitoringButtonState(false);
       pollStatus(); // Refresh status immediately
       loadIncomingSms();
     } else {
@@ -248,6 +253,20 @@ async function handleSaveConfig(e) {
   } finally {
     submitBtn.disabled = false;
     spinner.style.display = "none";
+  }
+}
+
+async function handleStartMonitoring() {
+  try {
+    const res = await apiFetch("/api/monitor/start", { method: "POST" });
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      throw new Error(data.detail || "Unable to start monitoring");
+    }
+    showToast("Monitoring started for 10 minutes.", "success");
+    pollStatus();
+  } catch (err) {
+    showToast(err.message || "Unable to start monitoring.", "error");
   }
 }
 
@@ -301,9 +320,13 @@ function updateStatusUI(data) {
   
   // 3. Device status
   const deviceStatus = document.getElementById("statusDevice");
+  const monitorActive = !!data.monitoring_active;
   if (!data.firebase_configured) {
     deviceStatus.innerText = "Waiting for Config";
     deviceStatus.className = "value text-muted";
+  } else if (!monitorActive) {
+    deviceStatus.innerText = "MONITOR OFF";
+    deviceStatus.className = "value text-glow-red";
   } else if (data.selected_device_online) {
     deviceStatus.innerText = "ONLINE";
     deviceStatus.className = "value text-glow-green";
@@ -315,6 +338,51 @@ function updateStatusUI(data) {
   // 4. Update online devices list
   onlineDevices = data.online_devices || [];
   updateDeviceSelect(onlineDevices, currentConfig.selected_device_id);
+  refreshMonitoringUi(data);
+}
+
+function refreshMonitoringUi(data) {
+  const btn = document.getElementById("monitorStartBtn");
+  const hint = document.getElementById("monitorHint");
+  if (!btn || !hint) return;
+
+  const active = !!data?.monitoring_active;
+  showMonitoringButtonState(active);
+  if (!active) {
+    hint.innerText = "Monitoring is inactive until you start it.";
+    if (monitoringExpiresTimer) {
+      clearInterval(monitoringExpiresTimer);
+      monitoringExpiresTimer = null;
+    }
+    return;
+  }
+
+  const expiresAt = data.monitoring_expires_at ? new Date(data.monitoring_expires_at) : null;
+  if (expiresAt && !Number.isNaN(expiresAt.getTime())) {
+    const remaining = Math.max(0, Math.floor((expiresAt.getTime() - Date.now()) / 1000));
+    hint.innerText = `Monitoring active for ${formatDuration(remaining)} more.`;
+    if (!monitoringExpiresTimer) {
+      monitoringExpiresTimer = setInterval(() => {
+        refreshMonitoringUi({ monitoring_active: true, monitoring_expires_at: data.monitoring_expires_at });
+      }, 1000);
+    }
+  } else {
+    hint.innerText = "Monitoring active.";
+  }
+}
+
+function showMonitoringButtonState(active) {
+  const btn = document.getElementById("monitorStartBtn");
+  if (!btn) return;
+  btn.disabled = active;
+  btn.innerHTML = active ? "<span>Monitoring Active</span>" : "<span>Start Monitoring</span>";
+}
+
+function formatDuration(totalSeconds) {
+  const mins = Math.floor(totalSeconds / 60);
+  const secs = totalSeconds % 60;
+  if (mins > 0) return `${mins}m ${secs}s`;
+  return `${secs}s`;
 }
 
 function updateDeviceSelect(devices, selectedId) {

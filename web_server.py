@@ -9,7 +9,7 @@ import time
 import uuid
 import contextvars
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any
 from urllib import parse
@@ -66,7 +66,11 @@ DEFAULT_CONFIG = {
     "last_timestamp": 0,
     "last_incoming_id": 0,
     "auto_inject_incoming": True,
-    "is_polling_active": bool(os.getenv("SMS_LICENSE_KEY"))
+    "is_polling_active": bool(os.getenv("SMS_LICENSE_KEY")),
+    "monitoring_active": False,
+    "monitoring_started_at": "",
+    "monitoring_expires_at": "",
+    "monitored_device_id": ""
 }
 
 def load_config(request: Request | None = None) -> dict[str, Any]:
@@ -114,6 +118,30 @@ def save_config_for_session(session_id: str, config: dict[str, Any]) -> None:
         config_path.write_text(json.dumps(config, indent=2, ensure_ascii=False), encoding="utf-8")
     except Exception as e:
         logger.error(f"Error saving config: {e}")
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+def _parse_iso_dt(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        text = str(value).strip().replace("Z", "+00:00")
+        return datetime.fromisoformat(text)
+    except Exception:
+        return None
+
+def _monitoring_expired(config: dict[str, Any]) -> bool:
+    expires_at = _parse_iso_dt(str(config.get("monitoring_expires_at") or ""))
+    if not expires_at:
+        return False
+    return datetime.now(timezone.utc) >= expires_at
+
+def _clear_monitoring(config: dict[str, Any]) -> None:
+    config["monitoring_active"] = False
+    config["monitoring_started_at"] = ""
+    config["monitoring_expires_at"] = ""
+    config["monitored_device_id"] = ""
 
 def get_audit_log_path(session_id: str) -> Path:
     if session_id == "shared":
@@ -702,6 +730,7 @@ async def api_login(req: LoginRequest, response: Response, request: Request):
                     config["firebase_url"] = firebase_url
                     config["auth_key"] = auth_key
                     config["is_polling_active"] = True
+                    _clear_monitoring(config)
                     # If this is a new key, reset the cursor
                     if old_license_key != key:
                         config["last_timestamp"] = 0
@@ -722,6 +751,7 @@ async def api_logout(response: Response, request: Request):
     session_id = get_session_id(request)
     config = load_config(request)
     config["is_polling_active"] = False
+    _clear_monitoring(config)
     config["license_key"] = ""
     config["last_timestamp"] = 0
     save_config_for_session(session_id, config)
@@ -762,6 +792,7 @@ async def api_get_config(request: Request):
 async def api_update_config(req: ConfigUpdateRequest, request: Request):
     session_id = get_session_id(request)
     config = load_config(request)
+    previous_device_id = str(config.get("selected_device_id") or "").strip()
     config["firebase_url"] = req.firebase_url.strip()
     config["auth_key"] = req.auth_key.strip()
     config["selected_device_id"] = req.selected_device_id.strip()
@@ -769,8 +800,33 @@ async def api_update_config(req: ConfigUpdateRequest, request: Request):
     config["poll_interval"] = max(1, req.poll_interval)
     if req.incoming_poll_interval is not None:
         config["incoming_poll_interval"] = max(0.25, min(float(req.incoming_poll_interval), 1.0))
+    if previous_device_id and previous_device_id != config["selected_device_id"]:
+        _clear_monitoring(config)
+        config["last_incoming_id"] = 0
     save_config_for_session(session_id, config)
     return {"success": True}
+
+@app.post("/api/monitor/start")
+async def api_start_monitoring(request: Request):
+    config = load_config(request)
+    if not config.get("firebase_url") or not config.get("auth_key"):
+        raise HTTPException(status_code=400, detail="Firebase URL and Auth Key are required")
+    if not config.get("selected_device_id"):
+        raise HTTPException(status_code=400, detail="Select a device before starting monitoring")
+
+    now = datetime.now(timezone.utc)
+    config["monitoring_active"] = True
+    config["monitoring_started_at"] = now.isoformat()
+    config["monitoring_expires_at"] = (now + timedelta(minutes=10)).isoformat()
+    config["monitored_device_id"] = str(config["selected_device_id"]).strip()
+    save_config_for_session(get_session_id(request), config)
+    return {
+        "success": True,
+        "monitoring_active": True,
+        "monitoring_started_at": config["monitoring_started_at"],
+        "monitoring_expires_at": config["monitoring_expires_at"],
+        "monitored_device_id": config["monitored_device_id"],
+    }
 
 @app.get("/api/status")
 async def api_get_status(request: Request):
@@ -780,13 +836,20 @@ async def api_get_status(request: Request):
     online_devices = []
     device_online = False
     firebase_ok = False
+    monitoring_active = bool(config.get("monitoring_active"))
+    monitoring_expired = _monitoring_expired(config) if monitoring_active else False
+    if monitoring_active and monitoring_expired:
+        _clear_monitoring(config)
+        save_config_for_session(get_session_id(request), config)
+        monitoring_active = False
     
     if config["firebase_url"] and config["auth_key"]:
         try:
             online_devices = await fetch_online_devices(config["firebase_url"], config["auth_key"])
             firebase_ok = True
-            if config["selected_device_id"]:
-                device_online = config["selected_device_id"] in online_devices
+            active_device = str(config.get("monitored_device_id") or config.get("selected_device_id") or "").strip()
+            if monitoring_active and active_device:
+                device_online = active_device in online_devices
         except Exception as e:
             logger.error(f"Status check Firebase error: {e}")
             
@@ -797,6 +860,9 @@ async def api_get_status(request: Request):
         "online_devices": online_devices,
         "selected_device_online": device_online,
         "vercel_polling": config["is_polling_active"],
+        "monitoring_active": monitoring_active,
+        "monitoring_expires_at": config.get("monitoring_expires_at", ""),
+        "monitored_device_id": config.get("monitored_device_id", ""),
         "last_poll_time": LAST_POLL_TIME,
         "last_timestamp": config["last_timestamp"]
     }
