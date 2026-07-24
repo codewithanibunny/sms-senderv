@@ -855,6 +855,7 @@ async def api_get_status(request: Request):
             
     return {
         "authenticated": bool(license_key),
+        "license_key": license_key,
         "firebase_configured": bool(config["firebase_url"]),
         "firebase_connected": firebase_ok,
         "online_devices": online_devices,

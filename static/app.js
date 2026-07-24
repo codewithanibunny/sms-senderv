@@ -54,7 +54,7 @@ function showDashboard(statusData) {
   document.getElementById("appContainer").classList.remove("hidden");
   
   // Set license key text
-  document.getElementById("activeKeyText").innerText = "ACTIVE";
+  updateKeyDisplay(statusData);
   
   // Initial Loads
   loadConfig();
@@ -124,6 +124,7 @@ async function handleLogin(e) {
       if (sessionId) {
         localStorage.setItem("sms_session_id", sessionId);
       }
+      localStorage.setItem("sms_license_key", key);
       keyInput.value = "";
       linkInput.value = "";
       showToast("License key verified & Profex connection established!", "success");
@@ -183,6 +184,7 @@ async function handleLogout() {
   try {
     await apiFetch("/api/logout", { method: "POST" });
     localStorage.removeItem("sms_session_id");
+    localStorage.removeItem("sms_license_key");
     showToast("Disconnected from stream.", "info");
     showLogin();
   } catch (err) {
@@ -325,7 +327,7 @@ function updateStatusUI(data) {
     deviceStatus.innerText = "Waiting for Config";
     deviceStatus.className = "value text-muted";
   } else if (!monitorActive) {
-    deviceStatus.innerText = "MONITOR OFF";
+    deviceStatus.innerText = "OFFLINE";
     deviceStatus.className = "value text-glow-red";
   } else if (data.selected_device_online) {
     deviceStatus.innerText = "ONLINE";
@@ -339,6 +341,19 @@ function updateStatusUI(data) {
   onlineDevices = data.online_devices || [];
   updateDeviceSelect(onlineDevices, currentConfig.selected_device_id);
   refreshMonitoringUi(data);
+  updateKeyDisplay(data);
+}
+
+function updateKeyDisplay(data) {
+  const keyEl = document.getElementById("activeKeyText");
+  if (!keyEl) return;
+  const key = String(data?.license_key || localStorage.getItem("sms_license_key") || "").trim();
+  if (!key) {
+    keyEl.innerText = "ACTIVE";
+    return;
+  }
+  keyEl.innerText = key.length > 18 ? `${key.slice(0, 8)}...${key.slice(-4)}` : key;
+  keyEl.title = key;
 }
 
 function refreshMonitoringUi(data) {
