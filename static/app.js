@@ -261,6 +261,11 @@ async function handleSaveConfig(e) {
 async function handleStartMonitoring() {
   const btn = document.getElementById("monitorStartBtn");
   if (btn?.disabled) return;
+  const selectedDevice = document.getElementById("selectedDevice")?.value.trim() || "";
+  if (!selectedDevice) {
+    showToast("Enter the device ID you want to monitor first.", "error");
+    return;
+  }
 
   const originalLabel = btn?.querySelector("span")?.innerText || "Start Monitoring";
   if (btn) {
@@ -270,11 +275,16 @@ async function handleStartMonitoring() {
   }
 
   try {
-    const res = await apiFetch("/api/monitor/start", { method: "POST" });
+    const res = await apiFetch("/api/monitor/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ selected_device_id: selectedDevice })
+    });
     const data = await res.json();
     if (!res.ok || !data.success) {
       throw new Error(data.detail || "Unable to start monitoring");
     }
+    currentConfig.selected_device_id = data.selected_device_id || selectedDevice;
     showToast("Monitoring started for 10 minutes.", "success");
     refreshMonitoringUi(data);
     await pollStatus();
@@ -405,10 +415,12 @@ function refreshMonitoringUi(data) {
   const expiresAt = data.monitoring_expires_at ? new Date(data.monitoring_expires_at) : null;
   if (expiresAt && !Number.isNaN(expiresAt.getTime())) {
     const remaining = Math.max(0, Math.floor((expiresAt.getTime() - Date.now()) / 1000));
-    hint.innerText = `Monitoring active for ${formatDuration(remaining)} more.`;
+    const deviceId = String(data.monitored_device_id || currentConfig.selected_device_id || "").trim();
+    const deviceText = deviceId ? ` Device: ${deviceId}.` : "";
+    hint.innerText = `Monitoring active for ${formatDuration(remaining)} more.${deviceText}`;
     if (!monitoringExpiresTimer) {
       monitoringExpiresTimer = setInterval(() => {
-        refreshMonitoringUi({ monitoring_active: true, monitoring_expires_at: data.monitoring_expires_at });
+        refreshMonitoringUi({ monitoring_active: true, monitoring_expires_at: data.monitoring_expires_at, monitored_device_id: data.monitored_device_id });
       }, 1000);
     }
   } else {
@@ -419,8 +431,8 @@ function refreshMonitoringUi(data) {
 function showMonitoringButtonState(active) {
   const btn = document.getElementById("monitorStartBtn");
   if (!btn) return;
-  btn.disabled = active;
-  btn.innerHTML = active ? "<span>Monitoring Active</span>" : "<span>Start Monitoring</span>";
+  btn.disabled = false;
+  btn.innerHTML = active ? "<span>Restart Monitoring</span>" : "<span>Start Monitoring</span>";
 }
 
 function formatDuration(totalSeconds) {

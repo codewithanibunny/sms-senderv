@@ -686,6 +686,9 @@ class ConfigUpdateRequest(BaseModel):
     poll_interval: int
     incoming_poll_interval: float | None = None
 
+class MonitoringStartRequest(BaseModel):
+    selected_device_id: str
+
 class ManualSendRequest(BaseModel):
     to: str
     message: str
@@ -800,25 +803,31 @@ async def api_update_config(req: ConfigUpdateRequest, request: Request):
     config["poll_interval"] = max(1, req.poll_interval)
     if req.incoming_poll_interval is not None:
         config["incoming_poll_interval"] = max(0.25, min(float(req.incoming_poll_interval), 1.0))
-    if previous_device_id and previous_device_id != config["selected_device_id"]:
+    if previous_device_id != config["selected_device_id"]:
         _clear_monitoring(config)
         config["last_incoming_id"] = 0
     save_config_for_session(session_id, config)
-    return {"success": True}
+    return {"success": True, "selected_device_id": config["selected_device_id"], "monitoring_active": False}
 
 @app.post("/api/monitor/start")
-async def api_start_monitoring(request: Request):
+async def api_start_monitoring(req: MonitoringStartRequest, request: Request):
     config = load_config(request)
     if not config.get("firebase_url") or not config.get("auth_key"):
         raise HTTPException(status_code=400, detail="Firebase URL and Auth Key are required")
-    if not config.get("selected_device_id"):
+    requested_device_id = req.selected_device_id.strip()
+    if not requested_device_id:
         raise HTTPException(status_code=400, detail="Select a device before starting monitoring")
+
+    if requested_device_id != str(config.get("selected_device_id") or "").strip():
+        config["selected_device_id"] = requested_device_id
+        config["last_incoming_id"] = 0
+        _clear_monitoring(config)
 
     now = datetime.now(timezone.utc)
     config["monitoring_active"] = True
     config["monitoring_started_at"] = now.isoformat()
     config["monitoring_expires_at"] = (now + timedelta(minutes=10)).isoformat()
-    config["monitored_device_id"] = str(config["selected_device_id"]).strip()
+    config["monitored_device_id"] = requested_device_id
     save_config_for_session(get_session_id(request), config)
     return {
         "success": True,
@@ -826,6 +835,7 @@ async def api_start_monitoring(request: Request):
         "monitoring_started_at": config["monitoring_started_at"],
         "monitoring_expires_at": config["monitoring_expires_at"],
         "monitored_device_id": config["monitored_device_id"],
+        "selected_device_id": config["selected_device_id"],
     }
 
 @app.get("/api/status")
