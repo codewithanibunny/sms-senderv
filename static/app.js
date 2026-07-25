@@ -259,6 +259,16 @@ async function handleSaveConfig(e) {
 }
 
 async function handleStartMonitoring() {
+  const btn = document.getElementById("monitorStartBtn");
+  if (btn?.disabled) return;
+
+  const originalLabel = btn?.querySelector("span")?.innerText || "Start Monitoring";
+  if (btn) {
+    btn.disabled = true;
+    const label = btn.querySelector("span");
+    if (label) label.innerText = "Starting Monitoring...";
+  }
+
   try {
     const res = await apiFetch("/api/monitor/start", { method: "POST" });
     const data = await res.json();
@@ -266,9 +276,16 @@ async function handleStartMonitoring() {
       throw new Error(data.detail || "Unable to start monitoring");
     }
     showToast("Monitoring started for 10 minutes.", "success");
-    pollStatus();
+    refreshMonitoringUi(data);
+    await pollStatus();
   } catch (err) {
     showToast(err.message || "Unable to start monitoring.", "error");
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      const label = btn.querySelector("span");
+      if (label) label.innerText = originalLabel;
+    }
   }
 }
 
