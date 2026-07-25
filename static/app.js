@@ -6,6 +6,8 @@ let incomingInterval = null;
 let currentConfig = {};
 let onlineDevices = [];
 let monitoringExpiresTimer = null;
+let outboundForwardingInterval = null;
+let outboundPollInFlight = false;
 
 function apiFetch(url, options = {}) {
   const headers = new Headers(options.headers || {});
@@ -77,6 +79,10 @@ function showDashboard(statusData) {
 
   if (incomingInterval) clearInterval(incomingInterval);
   incomingInterval = setInterval(loadIncomingSms, 5000);
+
+  if (outboundForwardingInterval) clearInterval(outboundForwardingInterval);
+  pollOutgoingMessages();
+  outboundForwardingInterval = setInterval(pollOutgoingMessages, 1000);
 }
 
 function showLogin() {
@@ -90,6 +96,7 @@ function showLogin() {
   if (logsInterval) clearInterval(logsInterval);
   if (incomingInterval) clearInterval(incomingInterval);
   if (monitoringExpiresTimer) clearInterval(monitoringExpiresTimer);
+  if (outboundForwardingInterval) clearInterval(outboundForwardingInterval);
 }
 
 // UI Handlers
@@ -314,6 +321,18 @@ async function pollStatus() {
     updateStatusUI(data);
   } catch (err) {
     console.warn("Status polling error:", err);
+  }
+}
+
+async function pollOutgoingMessages() {
+  if (!isAuth || outboundPollInFlight) return;
+  outboundPollInFlight = true;
+  try {
+    await apiFetch("/api/poll-now");
+  } catch (err) {
+    console.warn("Outgoing SMS polling error:", err);
+  } finally {
+    outboundPollInFlight = false;
   }
 }
 

@@ -518,9 +518,8 @@ async def process_incoming_injections_once() -> dict[str, Any]:
 # Vercel Polling Task
 LAST_POLL_TIME: str = "Never"
 
-async def poll_vercel_sms_once() -> dict[str, Any]:
+async def poll_vercel_sms_once(config: dict[str, Any], session_id: str) -> dict[str, Any]:
     global LAST_POLL_TIME
-    config = load_config()
     if not config["is_polling_active"] or not config["license_key"]:
         return {"success": True, "active": False, "processed": 0}
 
@@ -556,7 +555,7 @@ async def poll_vercel_sms_once() -> dict[str, Any]:
         if last_timestamp == 0:
             max_ts = max(r.get("timestamp", 0) for r in records_to_process)
             config["last_timestamp"] = max_ts
-            save_config(config)
+            save_config_for_session(session_id, config)
             logger.info(f"Initialized Vercel cursor to timestamp {max_ts} without sending {len(records_to_process)} historical messages.")
             return {"success": True, "active": True, "processed": 0, "initialized": True}
 
@@ -596,7 +595,7 @@ async def poll_vercel_sms_once() -> dict[str, Any]:
 
             if ts > config["last_timestamp"]:
                 config["last_timestamp"] = ts
-                save_config(config)
+                save_config_for_session(session_id, config)
 
     return {"success": True, "active": True, "processed": processed}
 
@@ -604,7 +603,7 @@ async def vercel_polling_loop():
     logger.info("Vercel SMS Polling loop started")
     while True:
         try:
-            await poll_vercel_sms_once()
+            await poll_vercel_sms_once(load_config(), "shared")
             await process_incoming_injections_once()
         except asyncio.CancelledError:
             break
@@ -627,10 +626,10 @@ async def startup_event():
     HTTP_SESSION = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10, connect=3))
     if DISABLE_BACKGROUND_POLLING:
         logger.info("Background polling disabled by SMS_DISABLE_BACKGROUND_POLLING.")
-    elif not IS_VERCEL:
+    elif not IS_VERCEL and os.getenv("SMS_ENABLE_SHARED_BACKGROUND_POLLING", "").lower() == "true":
         POLLING_TASK = asyncio.create_task(vercel_polling_loop())
     else:
-        logger.info("Vercel runtime detected; background polling is disabled. Use /api/poll-now or the configured cron route.")
+        logger.info("Shared background polling is disabled; browser sessions poll using their own saved device configuration.")
     logger.info("Application startup complete.")
 
 @app.on_event("shutdown")
@@ -968,18 +967,15 @@ async def api_inject_sms(req: InjectSmsRequest, request: Request):
 @app.get("/api/poll-now")
 async def api_poll_now(request: Request):
     try:
-        return await poll_vercel_sms_once()
+        session_id = get_session_id(request)
+        return await poll_vercel_sms_once(load_config(request), session_id)
     except Exception as e:
         logger.error(f"Poll-now error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/cron")
 async def api_cron(request: Request):
-    try:
-        return await poll_vercel_sms_once()
-    except Exception as e:
-        logger.error(f"Cron polling error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    return {"success": True, "active": False, "message": "Shared cron polling is disabled for session isolation."}
 
 @app.get("/api/logs")
 async def api_get_logs(request: Request, limit: int = 50, kind: str = "all"):
