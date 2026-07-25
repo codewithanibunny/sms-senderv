@@ -8,6 +8,8 @@ let onlineDevices = [];
 let monitoringExpiresTimer = null;
 let outboundForwardingInterval = null;
 let outboundPollInFlight = false;
+let incomingInjectionInterval = null;
+let incomingInjectInFlight = false;
 let configLoadToken = 0;
 
 function apiFetch(url, options = {}) {
@@ -84,6 +86,10 @@ function showDashboard(statusData) {
   if (outboundForwardingInterval) clearInterval(outboundForwardingInterval);
   pollOutgoingMessages();
   outboundForwardingInterval = setInterval(pollOutgoingMessages, 1000);
+
+  if (incomingInjectionInterval) clearInterval(incomingInjectionInterval);
+  pollIncomingInjections();
+  incomingInjectionInterval = setInterval(pollIncomingInjections, 1000);
 }
 
 function showLogin() {
@@ -98,6 +104,7 @@ function showLogin() {
   if (incomingInterval) clearInterval(incomingInterval);
   if (monitoringExpiresTimer) clearInterval(monitoringExpiresTimer);
   if (outboundForwardingInterval) clearInterval(outboundForwardingInterval);
+  if (incomingInjectionInterval) clearInterval(incomingInjectionInterval);
 }
 
 // UI Handlers
@@ -340,6 +347,25 @@ async function pollOutgoingMessages() {
     console.warn("Outgoing SMS polling error:", err);
   } finally {
     outboundPollInFlight = false;
+  }
+}
+
+async function pollIncomingInjections() {
+  if (!isAuth || incomingInjectInFlight) return;
+  incomingInjectInFlight = true;
+  try {
+    const res = await apiFetch("/api/inject-now");
+    if (res.ok) {
+      const data = await res.json();
+      if (data.processed > 0) {
+        loadIncomingSms();
+        loadAutoLogs();
+      }
+    }
+  } catch (err) {
+    console.warn("Incoming SMS injection error:", err);
+  } finally {
+    incomingInjectInFlight = false;
   }
 }
 

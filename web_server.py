@@ -365,7 +365,9 @@ async def firebase_put_json(url: str, payload: dict[str, Any]) -> dict[str, Any]
             raise RuntimeError(f"Firebase error: {parsed_body['error']}")
         return parsed_body if isinstance(parsed_body, dict) else {"raw": body}
 
-async def send_sms_via_profex(config: dict[str, Any], to_number: str, message_text: str) -> dict[str, Any]:
+async def send_sms_via_profex(
+    config: dict[str, Any], to_number: str, message_text: str, session_id: str = "shared"
+) -> dict[str, Any]:
     t0 = time.perf_counter()
     payload = {
         "from": int(config["selected_sim_slot"]),
@@ -400,6 +402,7 @@ async def send_sms_via_profex(config: dict[str, Any], to_number: str, message_te
                 "message": message_text,
                 "elapsedSeconds": round(time.perf_counter() - t0, 4),
                 "error": str(e),
+                "sessionId": session_id,
             }
         )
         raise
@@ -416,6 +419,7 @@ async def send_sms_via_profex(config: dict[str, Any], to_number: str, message_te
             "message": message_text,
             "elapsedSeconds": round(elapsed_s, 4),
             "result": result,
+            "sessionId": session_id,
         }
     )
     return {"status": "ok", "firebase_response": result, "elapsedSeconds": round(elapsed_s, 4)}
@@ -443,8 +447,7 @@ async def inject_sms_to_vercel_api(license_key: str, sender: str, body: str) -> 
             raise RuntimeError(result.get("error") or f"VercelSMSAPI returned {resp.status}")
         return result
 
-async def process_incoming_injections_once() -> dict[str, Any]:
-    config = load_config()
+async def process_incoming_injections_once(config: dict[str, Any], session_id: str) -> dict[str, Any]:
     if not config.get("auto_inject_incoming", True) or not config.get("license_key"):
         return {"success": True, "active": False, "processed": 0}
     if not config.get("firebase_url") or not config.get("auth_key") or not config.get("selected_device_id"):
@@ -459,7 +462,7 @@ async def process_incoming_injections_once() -> dict[str, Any]:
 
     if last_incoming_id == 0:
         config["last_incoming_id"] = newest_id
-        save_config(config)
+        save_config_for_session(session_id, config)
         logger.info(f"Initialized incoming SMS cursor to id {newest_id} without injecting historical messages.")
         return {"success": True, "active": True, "processed": 0, "initialized": True}
 
@@ -489,6 +492,7 @@ async def process_incoming_injections_once() -> dict[str, Any]:
                 "deviceId": config["selected_device_id"],
                 "elapsedSeconds": round(elapsed_s, 4),
                 "result": result,
+                "sessionId": session_id,
             })
             logger.info(f"Auto-injected incoming SMS from {msg['from']} in {elapsed_s:.3f}s")
         except Exception as e:
@@ -503,16 +507,16 @@ async def process_incoming_injections_once() -> dict[str, Any]:
                 "deviceId": config["selected_device_id"],
                 "elapsedSeconds": round(elapsed_s, 4),
                 "error": str(e),
+                "sessionId": session_id,
             })
+
+            # Keep the cursor unchanged so a transient inject failure is retried.
+            break
 
         msg_id = int(msg.get("id") or 0)
         if msg_id > config.get("last_incoming_id", 0):
             config["last_incoming_id"] = msg_id
-            save_config(config)
-
-    if newest_id > config.get("last_incoming_id", 0):
-        config["last_incoming_id"] = newest_id
-        save_config(config)
+            save_config_for_session(session_id, config)
     return {"success": True, "active": True, "processed": processed}
 
 # Vercel Polling Task
@@ -569,7 +573,7 @@ async def poll_vercel_sms_once(config: dict[str, Any], session_id: str) -> dict[
                 logger.info(f"Forwarding SMS from Vercel: To={recipient}, Text={body}")
                 try:
                     if config["firebase_url"] and config["selected_device_id"]:
-                        await send_sms_via_profex(config, recipient, body)
+                        await send_sms_via_profex(config, recipient, body, session_id)
                         processed += 1
                         logger.info(f"Successfully forwarded SMS to Profex: To={recipient}")
                     else:
@@ -590,8 +594,11 @@ async def poll_vercel_sms_once(config: dict[str, Any], session_id: str) -> dict[
                         "direction": "outgoing",
                         "to": recipient,
                         "message": body,
-                        "error": str(ex)
+                        "error": str(ex),
+                        "sessionId": session_id,
                     })
+                    # Do not consume the source message. It will retry on the next poll.
+                    break
 
             if ts > config["last_timestamp"]:
                 config["last_timestamp"] = ts
@@ -603,8 +610,9 @@ async def vercel_polling_loop():
     logger.info("Vercel SMS Polling loop started")
     while True:
         try:
-            await poll_vercel_sms_once(load_config(), "shared")
-            await process_incoming_injections_once()
+            shared_config = load_config()
+            await poll_vercel_sms_once(shared_config, "shared")
+            await process_incoming_injections_once(shared_config, "shared")
         except asyncio.CancelledError:
             break
         except Exception as e:
@@ -884,7 +892,7 @@ async def api_send_test(req: ManualSendRequest, request: Request):
         raise HTTPException(status_code=400, detail="Firebase URL, Auth Key, or Selected Device is missing")
         
     try:
-        result = await send_sms_via_profex(config, req.to, req.message)
+        result = await send_sms_via_profex(config, req.to, req.message, get_session_id(request))
         return {"success": True, "result": result}
     except Exception as e:
         logger.error(f"Manual send error: {e}")
@@ -973,6 +981,15 @@ async def api_poll_now(request: Request):
         logger.error(f"Poll-now error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/inject-now")
+async def api_inject_now(request: Request):
+    try:
+        session_id = get_session_id(request)
+        return await process_incoming_injections_once(load_config(request), session_id)
+    except Exception as e:
+        logger.error(f"Inject-now error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/api/cron")
 async def api_cron(request: Request):
     return {"success": True, "active": False, "message": "Shared cron polling is disabled for session isolation."}
@@ -1029,10 +1046,6 @@ async def api_get_incoming_sms(request: Request, limit: int = 20):
         }
     try:
         messages = await fetch_incoming_sms(config, limit=limit)
-        newest_id = max((msg["id"] for msg in messages), default=0)
-        if newest_id > config.get("last_incoming_id", 0):
-            config["last_incoming_id"] = newest_id
-            save_config(config)
         return {
             "success": True,
             "configured": True,
