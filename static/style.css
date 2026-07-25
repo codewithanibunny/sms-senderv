@@ -564,13 +564,28 @@ header .subtitle {
   color: var(--text-color);
 }
 
+.diagnostic-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+  min-width: 0;
+}
+
+.diagnostic-status .value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .status-chip {
   display: inline-flex;
   align-items: center;
-  width: fit-content;
-  margin-top: 0.15rem;
-  padding: 0.28rem 0.55rem;
-  border-radius: 999px;
+  flex: 0 0 auto;
+  min-height: 1.65rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: 5px;
   border: 1px solid rgba(244, 63, 94, 0.35);
   background: rgba(244, 63, 94, 0.12);
   color: #fda4af;
@@ -595,20 +610,21 @@ header .subtitle {
 .diagnostic-actions {
   margin-top: 1.2rem;
   display: flex;
-  align-items: center;
-  gap: 0.9rem;
-  flex-wrap: wrap;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.55rem;
 }
 
 .btn-monitor {
-  width: auto;
+  width: 100%;
   padding: 0.75rem 1rem;
-  min-width: 170px;
 }
 
 .monitor-hint {
+  display: block;
   color: var(--text-muted);
   font-size: 0.85rem;
+  line-height: 1.35;
 }
 
 /* WEBHOOK CARD */
