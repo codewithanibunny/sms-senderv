@@ -8,6 +8,7 @@ let onlineDevices = [];
 let monitoringExpiresTimer = null;
 let outboundForwardingInterval = null;
 let outboundPollInFlight = false;
+let configLoadToken = 0;
 
 function apiFetch(url, options = {}) {
   const headers = new Headers(options.headers || {});
@@ -201,10 +202,12 @@ async function handleLogout() {
 
 // Config CRUD
 async function loadConfig() {
+  const loadToken = ++configLoadToken;
   try {
     const res = await apiFetch("/api/config");
     if (!res.ok) return;
     const data = await res.json();
+    if (loadToken !== configLoadToken) return;
     currentConfig = data;
     
     document.getElementById("firebaseUrl").value = data.firebase_url || "";
@@ -233,6 +236,7 @@ async function handleSaveConfig(e) {
   
   submitBtn.disabled = true;
   spinner.style.display = "block";
+  configLoadToken += 1;
   
   try {
     const res = await apiFetch("/api/config", {
@@ -247,15 +251,18 @@ async function handleSaveConfig(e) {
       })
     });
     
-    if (res.ok) {
-      showToast("Configuration saved successfully!", "success");
-      currentConfig.selected_device_id = device;
+    const result = await res.json();
+    if (res.ok && result.success) {
+      const savedDeviceId = String(result.selected_device_id || device).trim();
+      document.getElementById("selectedDevice").value = savedDeviceId;
+      currentConfig.selected_device_id = savedDeviceId;
+      showToast(`Configuration saved for device: ${savedDeviceId}`, "success");
       showMonitoringButtonState(false);
-      pollStatus(); // Refresh status immediately
+      await pollStatus();
+      await loadConfig();
       loadIncomingSms();
     } else {
-      const errData = await res.json();
-      showToast(errData.detail || "Failed to save configuration.", "error");
+      showToast(result.detail || "Failed to save configuration.", "error");
     }
   } catch (err) {
     showToast("Network error. Failed to save.", "error");

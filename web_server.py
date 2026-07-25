@@ -723,7 +723,7 @@ async def api_login(req: LoginRequest, response: Response, request: Request):
                     # Key is valid! Save it, config, and activate polling
                     config = load_config(request)
                     old_license_key = config.get("license_key", "")
-                    session_id = request_session_id = get_session_id()
+                    session_id = request_session_id = get_session_id(request)
                     if request_session_id == "shared":
                         request_session_id = uuid.uuid4().hex
                     response.set_cookie(SESSION_COOKIE, request_session_id, httponly=True, samesite="lax")
@@ -770,7 +770,7 @@ async def api_import_link(req: ImportLinkRequest, request: Request):
     config = load_config(request)
     config["firebase_url"] = firebase_url
     config["auth_key"] = auth_key
-    save_config(config)
+    save_config_for_session(get_session_id(request), config)
     return {
         "success": True, 
         "firebase_url": firebase_url, 
